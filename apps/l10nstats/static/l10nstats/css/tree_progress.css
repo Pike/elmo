@@ -80,3 +80,9 @@ td:nth-child(even) {
 .tooltip .hellip {
     display: inline;
 }
+
+.percentile {
+    stroke: blue;
+    stroke-width: 1.5px;
+    fill: none;
+}

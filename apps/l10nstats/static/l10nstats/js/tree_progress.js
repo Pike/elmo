@@ -26,6 +26,9 @@ Data.prototype = {
      }
      this._data[to] += 1;
    },
+  value: function(prop, val) {
+    this._data[prop] = val;
+  },
   data: function(date) {
     var v = 0, rv = {}, _d = this._data;
     if (date) rv.date = date;
@@ -48,7 +51,8 @@ var showBad = SHOW_BAD;
 var bound = BOUND;
 var params = {
   bound: bound,
-  showBad: showBad
+  showBad: showBad,
+  percentile: PERCENTILE
 };
 
 var data, state, data0, X;
@@ -61,6 +65,7 @@ function renderPlot() {
   var _p = {};
   if (!params.showBad) _p.hideBad = true;
   if (params.bound) _p.bound = params.bound;
+  if (params.percentile) _p.percentile = params.percentile;
   var tp = timeplot("#my-timeplot",
                     fullrange,
                     [startdate, enddate],
@@ -72,9 +77,12 @@ function renderPlot() {
   var goodLocalesElt = $('.good', tooltipElt);
   var shadyLocalesElt = $('.shady', tooltipElt);
   var badLocalesElt = $('.bad', tooltipElt);
+  var percElt = $('.percentile', tooltipElt)
 
   var i = 0, loc;
-  state = new Data(null, ['good', 'shady', 'bad']);
+  var graphlabels = ['good', 'shady', 'bad'];
+  if (_p.percentile) graphlabels.unshift('percentile');
+  state = new Data(null, graphlabels);
   var latest = {};
   var _data = {};
   data = [];
@@ -83,23 +91,29 @@ function renderPlot() {
     if (_count > params.bound) return 'bad';
     return 'shady';
   }
+  Object.assign(_data, loc_data[i].locales);
   for (loc in loc_data[i].locales) {
     locales.push(loc);
     latest[loc] = _getState(loc_data[i].locales[loc]);
-    _data[loc] = loc_data[i].locales[loc];
     // no breaks on purpose, to stack data
     state.update(undefined, latest[loc]);
+  }
+  if (_p.percentile) {
+    state.value('percentile', percentile(_data, _p.percentile));
   }
   data.push(state.data(loc_data[i].time));
   var changeEvents = [];
   for (i = 1; i < loc_data.length; ++i) {
+    Object.assign(_data, loc_data[i].locales);
     for (loc in loc_data[i].locales) {
-      _data[loc] = loc_data[i].locales[loc];
       isGood = _getState(loc_data[i].locales[loc]);
       if (isGood != latest[loc]) {
         state.update(latest[loc], isGood);
         latest[loc] = isGood;
       }
+    }
+    if (_p.percentile) {
+      state.value('percentile', percentile(_data, _p.percentile))
     }
     data.push(state.data(loc_data[i].time));
   }
@@ -134,6 +148,19 @@ function renderPlot() {
         return ['#339900', 'grey', '#990000'][i];
       })
      .attr("d", area);
+  if (_p.percentile) {
+      tp.y2Domain([
+        Math.max(0, d3.min(data.map(function(d) { return d.percentile.missing; })) - 10),
+        d3.max(data.map(function(d) { return d.percentile.missing; })) + 10
+        ]);
+      var percLine = d3.svg.line()
+      .interpolate('step-after')
+        .x(function(d) {return tp.x(d.date)})
+        .y(function(d) {return tp.y2(d.percentile.missing)});
+      svg.append("path")
+        .attr("class", "percentile")
+        .attr("d", percLine(data));
+  }
 
   // --> Changing locales logic <-- //
 
@@ -248,6 +275,16 @@ function renderPlot() {
       tp.x.invert(mouseX - whiteBoxOffset),
       tp.x.invert(mouseX + whiteBoxOffset)
     );
+    if (_p.percentile) {
+      var date = tp.x.invert(mouseX), i = 0;
+      while (data[i] && data[i].date < date) ++i;
+      var datum = data[i-1].percentile;
+      percElt.html(`${datum.missing} (<a href="${dashboardHistoryUrl + datum.locale}">${datum.locale}</a>)`);
+      percElt.parent().show();
+    }
+    else {
+      percElt.parent().hide();
+    }
 
     // Finaly show those locales in the tooltip box.
     if (triagedLocales) {
@@ -306,9 +343,7 @@ function onClickPlot(evt) {
   var t = X.invert(x);
   var d = {};
   for (var i = 0; i < loc_data.length && loc_data[i].time < t; ++i) {
-    for (var loc in loc_data[i].locales) {
-      d[loc] = loc_data[i].locales[loc];
-    }
+    Object.assign(d, loc_data[i].locales);
   }
   paintHistogram(d);
 }
@@ -405,6 +440,12 @@ function paintHistogram(d) {
     }
     hist_block.css("width", Number(_left).toFixed(1) + 'px');
   }
+}
+
+function percentile(current, perc) {
+  var vals = Object.keys(current).map(locale => ({"locale": locale, "missing": current[locale]}));
+  vals.sort((a, b) => a.missing - b.missing);
+  return vals[Math.floor((vals.length - 1) * perc / 100)];
 }
 
 $(renderPlot);
